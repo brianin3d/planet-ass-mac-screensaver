@@ -25,3 +25,5 @@ OK... at least you have a run me script, you can also just run
 % xcodebuild && open ./build/Release/PlanetAss.saver
 
 How great is that?! Keep you answer to yourself! No! I'm kidding, tell me how you love it!
+
+If you can't stop reading about it, why not check out https://github.com/brianin3d/planet-ass-mac-screensaver/wiki ?

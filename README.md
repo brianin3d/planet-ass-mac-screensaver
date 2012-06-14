@@ -27,3 +27,5 @@ OK... at least you have a run me script, you can also just run
 How great is that?! Keep you answer to yourself! No! I'm kidding, tell me how you love it!
 
 If you can't stop reading about it, why not check out https://github.com/brianin3d/planet-ass-mac-screensaver/wiki ?
+
+Having trouble finding a random binary that claims to contain PlanetAss? Check out: https://github.com/brianin3d/planet-ass-mac-screensaver/tree/master/releases

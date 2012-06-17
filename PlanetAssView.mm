@@ -19,49 +19,74 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#define LAME (128 * 1 + 64 * 0 + 32 * 0 )
+#define LAME ( 256 * 0 + 128 * 1 + 64 * 0 + 32 * 0 )
 
 class Point3 {
+	private:
+		float x,y,z, distance;
 	public:
-		float x,y,z;
 		Point3() {
 			this->x = this->y = this->z = 0;
+			this->distance = 0;
 		}
 		Point3( float x,float y,float z ) {
 			this->x = x;
 			this->y = y;
 			this->z = z;
+			this->distance = x * x + y * y + z * z;
 		}
 		Point3( Point3 &that ) {
 			this->copy( that );
+			this->distance = x * x + y * y + z * z;
 		}
 
-		void copy( Point3 &that ) {
-			this->x = that.x;
-			this->y = that.y;
-			this->z = that.z;
+		Point3 &copy( Point3 &that ) {
+			return this->copy( that.x, that.y, that.z );
+		}
+
+		Point3 &copy( float x,float y,float z ) {
+			this->x = x;
+			this->y = y;
+			this->z = z;
+			this->dist();
+			return *this;
 		}
 
 		void scale( float f ) {
 			this->x *= f;
 			this->y *= f;
 			this->z *= f;
+			this->dist();
+		}
+
+		void print( FILE *bs ) {
+			fprintf( bs, "ptz:%f,%f,%f\n", x, y, z );
 		}
 
 		void add( Point3 &that ) {
 			this->x += that.x;
 			this->y += that.y;
 			this->z += that.z;
+			this->dist();
 		}
 
 		void minus( Point3 &that ) {
 			this->x -= that.x;
 			this->y -= that.y;
 			this->z -= that.z;
+			this->dist();
 		}
 
 		float dot( Point3 &that ) {
 			return this->x * that.x + this->y * that.y + this->z * that.z;
+		}
+		
+		float dist() {
+			return this->distance = sqrt( this->dot( *this ) );
+		}
+
+		float getDist() {
+			return this->distance;
 		}
 		
 		void vert() {
@@ -70,19 +95,18 @@ class Point3 {
 
 		void normalize() {
 			float length = this->length();
-			if ( 0 != length ) {
+			if ( 0 == length ) {
+				this->distance = 0;
+			} else {
 				this->x /= length;
 				this->y /= length;
 				this->z /= length;
+				this->distance = 1;
 			}
 		}
 
 		float length() {
-			return sqrt( length2() );
-		}
-
-		float length2() {
-			return dot( *this );
+			return this->getDist();
 		}
 
 		void cross( Point3 &a, Point3 &b ) {
@@ -101,10 +125,8 @@ class Spheroid {
 	private:
 		Point3 points[ LAME ][ LAME ];
 		FILE *bs;
-		int ok;
 	public:
 		Spheroid( float radius_ = 1.0 ) {
-			this->ok = 1;
 			this->bs = NULL;
 			for ( int i = 0 ; i < LAME ; i++ ) {
 				float ratio = i / ( float ) ( LAME - 1 ); // from 0 to 1
@@ -114,10 +136,12 @@ class Spheroid {
 				float radius = sqrt( 1 - y * y );
 
 				for ( int j = 0 ; j < LAME ; j++ ) {
-					float angle = ( 44.0 / 7.0 ) * ( j / ( float ) ( LAME - 1 * 0 ) );
-					this->points[ i ][ j ].x = radius * cos( angle ) * radius_;
-					this->points[ i ][ j ].z = radius * sin( angle ) * radius_;
-					this->points[ i ][ j ].y = y * radius_;
+					float angle = ( 44.0 / 7.0 ) * ( j / ( float ) ( LAME - 1 ) );
+					this->points[ i ][ j ].copy(
+						  radius * cos( angle ) * radius_
+						, radius * sin( angle ) * radius_
+						, y * radius_
+					);
 				}
 			}
 		}
@@ -127,41 +151,52 @@ class Spheroid {
 		}
 
 		void sphereMe( int madness ) {
+			float sum = 0;
 			int add = 1;
+			int underwater = 0;
+			float d;
 			for ( int i = 0 ; i < LAME ; i++ ) {
 				if ( i == LAME - 1 ) add = -1; // don't wrap around poles
 				for ( int j = 0 ; j < LAME ; j++ ) {
-					vert( i + 0,   j + 0, madness );
-					vert( i + 0,   j + 1, madness );
-					vert( i + add, j + 0, madness );
+					this->vert( i + 0,   j + 0, madness );
+					this->vert( i + 0,   j + 1, madness );
+					this->vert( i + add, j + 0, madness );
 
-					vert( i + 0,   j + 1, madness );
-					vert( i + add, j + 1, madness );
-					vert( i + add, j + 0, madness );
+					this->vert( i + 0,   j + 1, madness );
+					this->vert( i + add, j + 1, madness );
+					this->vert( i + add, j + 0, madness );
+				
+					d = this->points[ i ][ j ].getDist();	
+					sum += d;
+					if ( d < 0 ) underwater++;
 				}
 			}
-			this->ok = 0;
+
+			if ( 0 == madness ) {
+				float avg = sum / LAME / LAME;
+				if ( avg < 0.8 ) {
+					this->scale( 1.1 / avg );
+					this->smooth();
+					fprintf( bs, "enbiggen: %f (ittle bitty)\n", avg );
+				}
+				if ( underwater > LAME * LAME * 0.5 ) {
+					this->scale( 1.05 );
+					fprintf( bs, "enbiggen: %d (underwater)\n", underwater );
+				}
+			}
 		}
 
-		void vert( int i, int j, int madness ) {
+		float vert( int i, int j, int madness ) {
+			float d = 0;
+			
 			Point3 &point = iGetUrPoint( i, j );
-			if ( NULL != bs && ok ) {
-				//fprintf( bs, "ptz:%f,%f,%f\n", point.x, point.y, point.z );
-			}
 
 			switch( madness ) {
-				case 0: distColor( point ); break;
-				case 1:
-					glColor3f( 1, 0, 0 );
-					break;
-				case 2:
-					// water texture
-					//glColor4f( 0, 0, 1, 0.5 );
-					glTexCoord2f( i / ( float ) LAME, j / ( float ) LAME );
-					break;
-				case 3:
-					glColor3f( 0.6,0.6,0.3);
-					break;
+				case 0: d = this->distColor( point ); break; // planet
+				case 1: glColor3f( 1, 0, 0 ); break; // shit knows
+				case 2: glColor4f( 0, 0, 1, 0.5 ); break; // water
+			   	case 3: glColor4f( 1, 1, 1, 0.2 ); break; // atmosphere
+				case 4: glColor3f( 0.6,0.6,0.3); break; // moon
 			} 
 
 			if ( 0 == madness ) {
@@ -173,7 +208,6 @@ class Spheroid {
 				Point3 cross;
 				cross.cross( a, b );
 				cross.normalize();
-				//cross.normal();
 
 				Point3 nu( point );
 				nu.normalize();
@@ -188,17 +222,21 @@ class Spheroid {
 			}
 
 			point.vert();
+
+			return d;
 		}
 
-		void distColor( Point3 &point ) {
-			float d = point.dot( point );
+		float distColor( Point3 &point ) {
+			float d = point.getDist(); 
 
 			if ( 0 ); 
 			else if ( d < 0.99 ) glColor3f( 0.80, 0.80, 1.00 ); // submerged
-			else if ( d < 1.05 ) glColor3f( 0.55, 0.27, 0.07 ); // dirt
-			else if ( d < 1.08 ) glColor3f( 0.13, 0.54, 0.13 ); // grass
+			else if ( d < 1.03 ) glColor3f( 0.55, 0.27, 0.07 ); // dirt
+			else if ( d < 1.10 ) glColor3f( 0.13, 0.54, 0.13 ); // grass
 			else if ( d < 1.25 ) glColor3f( 0.41, 0.46, 0.52 ); // stone
 			else glColor3f( 1, 1, 1 ); //snow
+
+			return d;
 		}
 
 		Point3 &iGetUrPoint( int i, int j ) {
@@ -230,7 +268,14 @@ class Spheroid {
 			fall_off = 0.7;
 
 			Point3 &point = iGetUrPoint( i, j );
+			Point3 b4( point );
 			point.scale( 1 + d * express );
+
+			float dist = point.dot( point );
+			if ( dist < 0.25 ) {
+				point.copy( b4 );
+				//fprintf( bs, "smoochies\n" );
+			}
 
 			for ( int q = i - 1 ; q < i + 2 ; q++ ) {
 				for ( int p = j - 1 ; p < j + 2 ; p++ ) {
@@ -242,25 +287,61 @@ class Spheroid {
 		}
 
 		void smooth() {
-			Point3 tmp[ LAME ][ LAME ];
+			float distance[ LAME ][ LAME ];
+			float tmp[ LAME ][ LAME ];
 			for ( int i = 0 ; i < LAME ; i++ ) {
 				for ( int j = 0 ; j < LAME ; j++ ) {
-					int count = 0;
-					for ( int q = i - 1 ; q < i + 2 ; q++ ) {
-						for ( int p = j - 1 ; p < j + 2 ; p++ ) {
-							tmp[ i ][ j ].add( iGetUrPoint( q, p ) );
-							count++;
-						}
-					}
-					tmp[ i ][ j ].scale( 1 / ( float ) count  );
-				}
-			}
-			for ( int i = 0 ; i < LAME ; i++ ) {
-				for ( int j = 0 ; j < LAME ; j++ ) {
-					points[ i ][ j ].copy( tmp[ i ][ j ] );
+					distance[ i ][ j ] = this->points[ i ][ j ].getDist();
+					tmp[ i ][ j ] = 0;
 				}
 			}
 
+			int count;
+			int a;
+			int b;
+
+			for ( int i = 0 ; i < LAME ; i++ ) {
+				for ( int j = 0 ; j < LAME ; j++ ) {
+					count = 0;
+					for ( int q = i - 1 ; q < i + 2 ; q++ ) {
+						a = q;
+						if ( a < 0 ) a += LAME;
+						if ( a >= LAME ) a -= LAME;
+
+						for ( int p = j - 1 ; p < j + 2 ; p++ ) {
+							b = p;
+							if ( b < 0 ) b += LAME;
+							if ( b >= LAME ) b -= LAME;
+
+							tmp[ i ][ j ] += distance[ a ][ b ];
+							count++;
+
+							if ( NULL != bs ) {
+								//if ( 0==i&&j==0 ) fprintf( bs, "count:%d , add %f -> %f\n", count, distance[ a ][ b ], tmp[ i ][ j ] );
+							}
+							continue;
+
+							if ( q == i && p == j ) {
+								for ( int k = 0 ; k < 2 ; k++ ) {
+									tmp[ i ][ j ] += distance[ a ][ b ];
+									count++;
+								}
+							}
+						}
+					}
+					tmp[ i ][ j ] /= count;
+					if ( NULL != bs ) {
+						//if ( 0==i&&j==0 ) fprintf( bs, "average it: count:%d -> %f\n", count, tmp[ i ][ j ] );
+					}
+				}
+			}
+			for ( int i = 0 ; i < LAME ; i++ ) {
+				for ( int j = 0 ; j < LAME ; j++ ) {
+					if ( 0 != distance[ i ][ j ] ) {
+						points[ i ][ j ].scale( tmp[ i ][ j ] / distance[ i ][ j ] );
+					}
+				}
+			}
 		}
 
 		void shakeUp() {
@@ -270,7 +351,6 @@ class Spheroid {
 					this->points[ i ][ j ].scale( 1 + rand() * shake - rand() * shake );
 				}
 			}
-
 		}
 
 		void scale( float f ) {
@@ -282,9 +362,10 @@ class Spheroid {
 		}
 		void print( FILE *bs ) {
 			this->bs = bs;
+			return; // check it out java: c++ doesn't act like a whiney little bitch...
 			for ( int i = 0 ; i < LAME ; i++ ) {
 				for ( int j = 0 ; j < LAME ; j++ ) {
-					fprintf( bs, "ptz:%f,%f,%f\n", this->points[ i ][ j ].x, this->points[ i ][ j ].y, this->points[ i ][ j ].z );
+					this->points[ i ][ j ].print( bs );
 				}
 			}
 		}
@@ -295,6 +376,7 @@ class ThePlanetAss {
 		FILE *bs;
 		Spheroid planet;
 		Spheroid water;
+		Spheroid atmosphere;
 		Spheroid moon;
 		GLuint textureId;
 		float rotation_angle;
@@ -302,11 +384,11 @@ class ThePlanetAss {
 		ThePlanetAss() {
 			bs = fopen( "/tmp/bs.txt", "w" );
 			textureId = -1;
-			moon.scale( 0.1 );
 
-			// make the moon weirdly, perfectly round
+			// make the moon weirdly, not perfectly round
 			for ( int i = 0 ; i < 100 ; i++ ) {
-				this->smack( moon );
+				//this->smack( moon );
+				moon.shakeUp();
 			}
 			moon.smooth();
 
@@ -360,7 +442,7 @@ class ThePlanetAss {
 
 			GLuint ID;
 			GLuint funk = GL_MODULATE;
-			GLuint clamp = GL_REPEAT;
+			//GLuint clamp = GL_REPEAT;
 
 			glGenTextures( 1, &ID );
 			glBindTexture( GL_TEXTURE_2D, ID );
@@ -404,9 +486,12 @@ class ThePlanetAss {
 		}
 
 		void iterate() {
-			smack( this->planet );
-			if ( 0 == ( ( int ) this->rotation_angle ) % 100 ) {
-				this->planet.smooth();
+			int numberOfIterations = 200;
+			for ( int i = 0 ; i < numberOfIterations ; i++ ) {
+				smack( this->planet );
+				if ( 0 == ( i + ( ( int ) this->rotation_angle ) ) % 100 ) {
+					this->planet.smooth();
+				}
 			}
 		}
 
@@ -418,10 +503,14 @@ class ThePlanetAss {
 
 			this->rotation_angle += 1;
 
-			glRotatef( 0.2, 1.0f, 0.0f, 0.0f );
-			glRotatef( rotation_angle, 0.0f, 1.0f, 0.0f );
-	//		glRotatef( rotation_angle, 0.0f, 0.0f, 1.0f );
-		
+			//glRotatef( 1*rotation_angle, 1.0f, 0.0f, 0.0f );
+			glRotatef( 100, 1.0f, 0.0f, 0.0f );
+			glRotatef( 0*rotation_angle, 0.0f, 1.0f, 0.0f );
+			glRotatef( 1*rotation_angle, 0.0f, 0.0f, 1.0f );
+
+			//glRotatef( rotation_angle, 0.0f, 1.0f, 0.0f );
+			//glRotatef( 0, 0.0f, 1.0f, 0.0f );
+			//glRotatef( rotation_angle, 0.0f, 0.0f, 1.0f );
 		
 			if ( 0 ) {
 				glBegin( GL_LINES );     
@@ -441,24 +530,36 @@ class ThePlanetAss {
 				this->planet.draw( 0 );
 				glEnd();
 			}
+
+			glPushMatrix(); 
+			{
+				// move the moon!
+				glRotatef( rotation_angle, 0.0f, 1.0f, 1.0f );
+				glTranslatef( 1.6, 0, 0 );
+
+				glScalef( 0.1, 0.1, 0.1 );
+				glBegin( GL_TRIANGLES ); 
+				this->moon.draw( 4 );
+				glEnd();
+			}
+			glPopMatrix();
+
+
+
 	
-			glEnable( GL_TEXTURE_2D );
-			glEnable(GL_BLEND);
-			glEnable( GL_TEXTURE_2D );// mip
-			glBindTexture( GL_TEXTURE_2D, this->textureId );
-			glBegin( GL_TRIANGLES ); 
-			this->water.draw( 2 );
-			glEnd();
-			glDisable( GL_TEXTURE_2D );
+			glEnable( GL_BLEND ); 
+			{
+				glBegin( GL_TRIANGLES ); 
+				this->water.draw( 2 );
+				glEnd();
+
+				glScalef( 1.3, 1.3, 1.3 );
+				glBegin( GL_TRIANGLES ); 
+				this->water.draw( 3 );
+				glEnd();
+			} 
+			glDisable( GL_BLEND );
 			
-			// move the moon!
-			glRotatef( rotation_angle, 0.0f, 0.0f, 1.0f );
-			glTranslatef( 1.6, 0, 0 );
-
-			glBegin( GL_TRIANGLES ); 
-			this->moon.draw( 3 );
-			glEnd();
-
 /*
 			glBegin( GL_LINES ); 
 			glColor3f( 1, 0, 0 );
@@ -482,6 +583,13 @@ class ThePlanetAss {
 	/*srand([[NSDate date] timeIntervalSince1970]);*/
 	ThePlanetAss *thePlanetAss;
 	PlanetAssOpenGLView *glView;
+
+/* frck this! 
+		IBOutlet id configSheet;
+		IBOutlet id drawFilledShapesOption;
+		IBOutlet id drawOutlinedShapesOption;
+		IBOutlet id drawBothOption;
+*/
 }
 
 - (void)setUpOpenGL;
@@ -503,13 +611,30 @@ class ThePlanetAss {
 
 - (BOOL)hasConfigureSheet
 {
-    return NO;
+    return NO;//YES; frck this!
 }
 
 - (NSWindow*)configureSheet
 {
-    return nil;
+/* frck this!
+	if (!configSheet) {
+		if (![NSBundle loadNibNamed:@"ConfigureSheet" owner:self]) 
+		{
+			NSLog( @"Failed to load configure sheet." );
+			NSBeep();
+		}
+	}
+
+	return configSheet;
+*/
+	return nil;
 }
+
+/* frck this
+- (IBAction)cancelClick:(id)sender {
+	  [[NSApplication sharedApplication] endSheet:configSheet];
+}
+*/
 
 - (id)initWithFrame:(NSRect)frame isPreview:(BOOL)isPreview
 {
